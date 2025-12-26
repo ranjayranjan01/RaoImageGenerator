@@ -1,3 +1,4 @@
+
 import random
 import io
 from typing import Dict, Any, Tuple, List, Optional
@@ -16,6 +17,7 @@ from .ui.panel import panel_text
 from .ui.texts import help_text, join_required_text
 from .ui.keyboards import main_kb, back_kb, gate_kb, owner_kb
 
+
 class RaoBot:
     def __init__(self):
         if not BOT_TOKEN:
@@ -25,6 +27,13 @@ class RaoBot:
         self.state = load_state()
         self.temp: Dict[str, Any] = {}
         self.owner_flow: Dict[str, Any] = {"await": None}
+
+        # ensure required containers exist
+        self.state.setdefault("users", {})
+        self.state.setdefault("bans", {"banned": []})
+        self.state.setdefault("styles_cache", {"styles": [], "ts": 0})
+        self.state.setdefault("uname_cache", {})
+        self.state.setdefault("settings", {})
 
         self._register_handlers()
         self._setup_commands()
@@ -134,7 +143,7 @@ class RaoBot:
         if isinstance(lst, list):
             for x in lst:
                 if isinstance(x, dict) and x.get("chat"):
-                    out.append({"chat": str(x["chat"]).strip(), "invite": str(x.get("invite","")).strip()})
+                    out.append({"chat": str(x["chat"]).strip(), "invite": str(x.get("invite", "")).strip()})
         return out
 
     def user_in_chat(self, chat: str, uid: int) -> Optional[bool]:
@@ -155,7 +164,7 @@ class RaoBot:
             return True, [], []
         missing, unknown = [], []
         for t in targets:
-            chat = t.get("chat","").strip()
+            chat = t.get("chat", "").strip()
             if not chat:
                 continue
             res = self.user_in_chat(chat, uid)
@@ -165,6 +174,7 @@ class RaoBot:
                 missing.append(chat)
             if res is None:
                 unknown.append(chat)
+
         strict = bool(self.S().get("join_gate_strict", True))
         ok = (len(missing) == 0 and (len(unknown) == 0 if strict else True))
         return ok, missing, unknown
@@ -182,7 +192,7 @@ class RaoBot:
         return False
 
     # ----------------- UI -----------------
-    def send_panel(self, chat_id: int, uid: int, edit_mid: Optional[int]=None):
+    def send_panel(self, chat_id: int, uid: int, edit_mid: Optional[int] = None):
         u = self.get_user(uid)
         txt = panel_text(self.S(), u)
         kb = main_kb(is_owner=self.is_owner(uid), enhance_on=bool(u.get("enhance", True)))
@@ -191,7 +201,7 @@ class RaoBot:
         else:
             self.bot.send_message(chat_id, txt, reply_markup=kb, disable_web_page_preview=True)
 
-    def send_owner_panel(self, chat_id: int, edit_mid: Optional[int]=None):
+    def send_owner_panel(self, chat_id: int, edit_mid: Optional[int] = None):
         txt = (
             "🧬 <b>Owner Control Room (Root)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -205,13 +215,13 @@ class RaoBot:
             self.bot.send_message(chat_id, txt, reply_markup=kb, disable_web_page_preview=True)
 
     # ----------------- styles/models menus -----------------
-    def style_menu(self, page: int=0) -> types.InlineKeyboardMarkup:
+    def style_menu(self, page: int = 0) -> types.InlineKeyboardMarkup:
         styles = load_styles(self.state["styles_cache"])
         self.save()
         per = 10
         total = len(styles)
         pages = max(1, (total + per - 1) // per)
-        page = max(0, min(page, pages-1))
+        page = max(0, min(page, pages - 1))
         s = page * per
         e = min(s + per, total)
 
@@ -221,10 +231,10 @@ class RaoBot:
 
         nav = []
         if page > 0:
-            nav.append(types.InlineKeyboardButton("⬅️ Prev", callback_data=f"stylepage:{page-1}"))
-        nav.append(types.InlineKeyboardButton(f"📄 {page+1}/{pages}", callback_data="noop"))
-        if page < pages-1:
-            nav.append(types.InlineKeyboardButton("Next ➡️", callback_data=f"stylepage:{page+1}"))
+            nav.append(types.InlineKeyboardButton("⬅️ Prev", callback_data=f"stylepage:{page - 1}"))
+        nav.append(types.InlineKeyboardButton(f"📄 {page + 1}/{pages}", callback_data="noop"))
+        if page < pages - 1:
+            nav.append(types.InlineKeyboardButton("Next ➡️", callback_data=f"stylepage:{page + 1}"))
         kb.row(*nav)
 
         kb.add(types.InlineKeyboardButton("🎲 Random Style", callback_data="rand:style"))
@@ -243,12 +253,21 @@ class RaoBot:
 
     # ----------------- core actions -----------------
     def do_generate(self, chat_id: int, uid: int, prompt: str):
+        """
+        ✅ FIXED:
+        - indentation
+        - caption defined
+        - BytesIO filename fix
+        - proper try/except/finally
+        """
         if self.banned(uid):
             self.bot.send_message(chat_id, "🚫 You are banned.")
             return
+
         if not self.S().get("bot_enabled", True) and not self.is_owner(uid):
             self.bot.send_message(chat_id, self.S().get("maintenance_text", "🚧 Bot OFF"))
             return
+
         if not self.ensure_access(chat_id, uid):
             return
 
@@ -259,7 +278,7 @@ class RaoBot:
 
         ok, msg = self.check_daily(uid)
         if not ok:
-            self.bot.send_message(chat_id, f"⛔ {msg}")
+            self.bot.send_message(chat_id, f"⛔️ {msg}")
             return
 
         ok2, wait = self.check_cooldown(uid)
@@ -268,30 +287,49 @@ class RaoBot:
             return
 
         u = self.get_user(uid)
-        style = u.get("style", self.S().get("default_style","Pointillism"))
-        model = u.get("model", self.S().get("default_model","flux"))
+        style = u.get("style", self.S().get("default_style", "Pointillism"))
+        model = u.get("model", self.S().get("default_model", "flux"))
         enh = bool(u.get("enhance", True))
         final_prompt = enhance_prompt(prompt) if enh else prompt
 
-        m = self.bot.send_message(chat_id, f"⚡ Generating…\n🎨 <b>{style}</b> | 🧠 <b>{model}</b>")
+        caption = (
+            f"🟦 <b>{BOT_NAME}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🎨 Style: <b>{style}</b>\n"
+            f"🧠 Model: <b>{model}</b>\n"
+            f"✨ Enhance: <b>{'ON ✅' if enh else 'OFF ❌'}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📝 <b>Prompt:</b> {prompt}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🤖 {BOT_USERNAME}"
+        )
+
+        status_msg = self.bot.send_message(chat_id, f"⚡️ Generating…\n🎨 <b>{style}</b> | 🧠 <b>{model}</b>")
+
         try:
             img = fetch_image_bytes(final_prompt, model=model, style_title=style)
-self.add_history(uid, prompt)
 
-try:
-    photo = io.BytesIO(img)
-    photo.name = "rao.png"   # 🔴 VERY IMPORTANT (Railway fix)
+            # ✅ history save after successful fetch
+            self.add_history(uid, prompt)
 
-    self.bot.send_photo(chat_id, photo, caption=caption)
-    self.bot.delete_message(chat_id, m.message_id)
+            photo = io.BytesIO(img)
+            photo.name = "rao.png"  # ✅ IMPORTANT for Telegram API stability
 
-except Exception as e:
-    self.bot.send_message(
-        chat_id,
-        "❌ Image API busy / slow hai.\n⏳ 1-2 minute baad try karo."
-    )
+            self.bot.send_photo(chat_id, photo, caption=caption)
         except Exception as e:
-            self.bot.edit_message_text(f"❌ API Error: <code>{e}</code>", chat_id, m.message_id)
+            try:
+                self.bot.send_message(
+                    chat_id,
+                    "❌ Image API busy / slow hai.\n⏳ 1-2 minute baad try karo.\n\n"
+                    f"Debug: <code>{e}</code>"
+                )
+            except Exception:
+                pass
+        finally:
+            try:
+                self.bot.delete_message(chat_id, status_msg.message_id)
+            except Exception:
+                pass
 
     def do_tts(self, chat_id: int, uid: int, text: str):
         if not self.ensure_access(chat_id, uid):
@@ -302,7 +340,7 @@ except Exception as e:
             return
 
         u = self.get_user(uid)
-        voice = (u.get("tts_voice") or "").strip() or (self.S().get("tts_default_voice","").strip())
+        voice = (u.get("tts_voice") or "").strip() or (self.S().get("tts_default_voice", "").strip())
         if not voice:
             voices = get_voices()
             voice = voices[0] if voices else "default"
@@ -310,7 +348,9 @@ except Exception as e:
         msg = self.bot.send_message(chat_id, f"🎙 Generating audio…\n<b>Voice:</b> <code>{voice}</code>")
         try:
             audio = tts_audio_bytes(text, voice)
-            self.bot.send_audio(chat_id, audio, title="TTS", caption=f"🎙 <b>{voice}</b>")
+            file = io.BytesIO(audio)
+            file.name = "tts.mp3"
+            self.bot.send_audio(chat_id, file, title="TTS", caption=f"🎙 <b>{voice}</b>")
             try:
                 self.bot.delete_message(chat_id, msg.message_id)
             except Exception:
@@ -376,7 +416,6 @@ except Exception as e:
         left, right = [x.strip() for x in t.split("|", 1)]
         if not left or not right:
             return None
-        # left: @xxx or -100...
         if not (left.startswith("@") or left.startswith("-100")):
             return None
         if not (right.startswith("https://t.me/") or right.startswith("http://t.me/")):
@@ -404,8 +443,6 @@ except Exception as e:
                 self.handle_owner_text(m, step)
                 return
 
-            # normal commands handled by decorators below will run before this if match
-            # so here we do nothing
             return
 
         @b.message_handler(commands=["start"])
@@ -417,9 +454,12 @@ except Exception as e:
 
             ok, missing, unknown = self.join_check(uid)
             if not ok:
-                b.send_message(m.chat.id, join_required_text(missing, unknown),
-                               reply_markup=gate_kb(self.join_targets()),
-                               disable_web_page_preview=True)
+                b.send_message(
+                    m.chat.id,
+                    join_required_text(missing, unknown),
+                    reply_markup=gate_kb(self.join_targets()),
+                    disable_web_page_preview=True
+                )
                 return
             self.send_panel(m.chat.id, uid)
 
@@ -437,28 +477,38 @@ except Exception as e:
 
         @b.message_handler(commands=["uid"])
         def _uid(m):
-            # ONLY from cache (Telegram doesn't allow fetching any random user id reliably)
             parts = m.text.split()
             if len(parts) < 2:
-                b.send_message(m.chat.id, "Usage: <code>/uid @username</code>\n(Works only if user interacted with bot.)")
+                b.send_message(
+                    m.chat.id,
+                    "Usage: <code>/uid @username</code>\n(Works only if user interacted with bot.)"
+                )
                 return
             uname = clean_username(parts[1])
             row = self.state["uname_cache"].get(uname)
             if not row:
-                b.send_message(m.chat.id, f"❌ Not found in cache: <code>@{uname}</code>\nAsk user to /start the bot once.")
+                b.send_message(
+                    m.chat.id,
+                    f"❌ Not found in cache: <code>@{uname}</code>\nAsk user to /start the bot once."
+                )
                 return
-            b.send_message(m.chat.id, f"✅ <b>@{uname}</b>\n🆔 <code>{row.get('id')}</code>\n👤 {row.get('name','')}".strip())
+            b.send_message(
+                m.chat.id,
+                f"✅ <b>@{uname}</b>\n🆔 <code>{row.get('id')}</code>\n👤 {row.get('name','')}".strip()
+            )
 
         @b.message_handler(commands=["gen"])
         def _gen(m):
             uid = m.from_user.id
             prompt = m.text.split(" ", 1)[1] if " " in m.text else ""
+
             if m.chat.type != "private" and not prompt:
                 b.reply_to(m, "❌ Group me: <code>/gen your prompt</code>")
                 return
             if m.chat.type == "private" and not prompt:
                 b.reply_to(m, "✍️ Send prompt like: <code>/gen a realistic tiger in neon city</code>")
                 return
+
             self.do_generate(m.chat.id, uid, prompt)
 
         @b.message_handler(commands=["style"])
@@ -599,8 +649,10 @@ except Exception as e:
                     return
 
                 if data == "menu:help":
-                    b.edit_message_text(help_text(), c.message.chat.id, c.message.message_id,
-                                        reply_markup=back_kb(), disable_web_page_preview=True)
+                    b.edit_message_text(
+                        help_text(), c.message.chat.id, c.message.message_id,
+                        reply_markup=back_kb(), disable_web_page_preview=True
+                    )
                     b.answer_callback_query(c.id)
                     return
 
@@ -639,8 +691,10 @@ except Exception as e:
                     if not self.ensure_access(c.message.chat.id, uid):
                         b.answer_callback_query(c.id)
                         return
-                    b.edit_message_text("🎨 <b>Select Style</b>", c.message.chat.id, c.message.message_id,
-                                        reply_markup=self.style_menu(0), disable_web_page_preview=True)
+                    b.edit_message_text(
+                        "🎨 <b>Select Style</b>", c.message.chat.id, c.message.message_id,
+                        reply_markup=self.style_menu(0), disable_web_page_preview=True
+                    )
                     b.answer_callback_query(c.id)
                     return
 
@@ -676,8 +730,10 @@ except Exception as e:
                     if not self.ensure_access(c.message.chat.id, uid):
                         b.answer_callback_query(c.id)
                         return
-                    b.edit_message_text("🧠 <b>Select Model</b>", c.message.chat.id, c.message.message_id,
-                                        reply_markup=self.model_menu(), disable_web_page_preview=True)
+                    b.edit_message_text(
+                        "🧠 <b>Select Model</b>", c.message.chat.id, c.message.message_id,
+                        reply_markup=self.model_menu(), disable_web_page_preview=True
+                    )
                     b.answer_callback_query(c.id)
                     return
 
@@ -695,26 +751,23 @@ except Exception as e:
                     b.send_message(c.message.chat.id, "✍️ Send: <code>/gen your prompt</code>")
                     return
 
-                if data == "tts:ask":
-                    b.answer_callback_query(c.id)
-                    b.send_message(c.message.chat.id, "🎙 Send: <code>/tts your text</code>\nUse: /voices")
-                    return
-
-                if data == "search:ask":
-                    b.answer_callback_query(c.id)
-                    b.send_message(c.message.chat.id, "🔎 Send: <code>/search your query</code>")
-                    return
-
                 if data == "gate:recheck":
                     ok, missing, unknown = self.join_check(uid)
                     if ok:
                         b.answer_callback_query(c.id, "✅ Verified! Now /start again")
-                        b.edit_message_text("✅ Verified! Ab <b>/start</b> dubara bhejo.", c.message.chat.id, c.message.message_id,
-                                            disable_web_page_preview=True)
+                        b.edit_message_text(
+                            "✅ Verified! Ab <b>/start</b> dubara bhejo.",
+                            c.message.chat.id, c.message.message_id,
+                            disable_web_page_preview=True
+                        )
                     else:
                         b.answer_callback_query(c.id, "❌ Not joined yet")
-                        b.edit_message_text(join_required_text(missing, unknown), c.message.chat.id, c.message.message_id,
-                                            reply_markup=gate_kb(self.join_targets()), disable_web_page_preview=True)
+                        b.edit_message_text(
+                            join_required_text(missing, unknown),
+                            c.message.chat.id, c.message.message_id,
+                            reply_markup=gate_kb(self.join_targets()),
+                            disable_web_page_preview=True
+                        )
                     return
 
                 # Game callbacks
@@ -725,14 +778,14 @@ except Exception as e:
                 if data == "game:show":
                     b.answer_callback_query(c.id)
                     st = self.temp.get(str(uid), {})
-                    b.send_message(c.message.chat.id, f"😂 Meaning: <b>{st.get('meaning','No game')}</b>")
+                    b.send_message(c.message.chat.id, f"😂 Meaning: <b>{st.get('meaning', 'No game')}</b>")
                     return
 
                 # Owner panel
                 if data.startswith("owner:"):
                     b.answer_callback_query(c.id)
                     if not self.is_owner(uid):
-                        b.send_message(c.message.chat.id, "⛔ Root only.")
+                        b.send_message(c.message.chat.id, "⛔️ Root only.")
                         return
                     self.handle_owner_callback(c, data)
                     return
@@ -758,7 +811,11 @@ except Exception as e:
         kb.add(types.InlineKeyboardButton("👀 Show Meaning", callback_data="game:show"))
         kb.add(types.InlineKeyboardButton("🔁 New Word", callback_data="game:start"))
         kb.add(types.InlineKeyboardButton("🔙 Back", callback_data="back:main"))
-        self.bot.send_message(chat_id, f"🎮 <b>Funny Word Game</b>\n━━━━━━━━━━━━━━━━━━━━━━\nGuess meaning of: <b>{word}</b>", reply_markup=kb)
+        self.bot.send_message(
+            chat_id,
+            f"🎮 <b>Funny Word Game</b>\n━━━━━━━━━━━━━━━━━━━━━━\nGuess meaning of: <b>{word}</b>",
+            reply_markup=kb
+        )
 
     # ----------------- owner handlers -----------------
     def handle_owner_callback(self, c, data: str):
@@ -766,30 +823,36 @@ except Exception as e:
         mid = c.message.message_id
 
         if data == "owner:panel":
-            self.send_owner_panel(chat_id, edit_mid=mid); return
+            self.send_owner_panel(chat_id, edit_mid=mid)
+            return
 
         if data == "owner:toggle_bot":
             self.S()["bot_enabled"] = not bool(self.S().get("bot_enabled", True))
             self.save()
-            self.send_owner_panel(chat_id, edit_mid=mid); return
+            self.send_owner_panel(chat_id, edit_mid=mid)
+            return
 
         if data == "owner:set_cooldown":
             self.owner_flow["await"] = "cooldown"
-            self.bot.send_message(chat_id, "⏱ Send cooldown seconds (example: <code>8</code>)"); return
+            self.bot.send_message(chat_id, "⏱️ Send cooldown seconds (example: <code>8</code>)")
+            return
 
         if data == "owner:set_daily":
             self.owner_flow["await"] = "daily"
-            self.bot.send_message(chat_id, "📅 Send daily limit (0=unlimited). Example: <code>40</code>"); return
+            self.bot.send_message(chat_id, "📅 Send daily limit (0=unlimited). Example: <code>40</code>")
+            return
 
         if data == "owner:toggle_gate":
             self.S()["join_gate_enabled"] = not bool(self.S().get("join_gate_enabled", True))
             self.save()
-            self.send_owner_panel(chat_id, edit_mid=mid); return
+            self.send_owner_panel(chat_id, edit_mid=mid)
+            return
 
         if data == "owner:toggle_strict":
             self.S()["join_gate_strict"] = not bool(self.S().get("join_gate_strict", True))
             self.save()
-            self.send_owner_panel(chat_id, edit_mid=mid); return
+            self.send_owner_panel(chat_id, edit_mid=mid)
+            return
 
         if data == "owner:add_join":
             self.owner_flow["await"] = "add_join"
@@ -806,7 +869,8 @@ except Exception as e:
 
         if data == "owner:remove_join":
             self.owner_flow["await"] = "remove_join"
-            self.bot.send_message(chat_id, "➖ Send chat to remove (example: <code>@channel</code> OR <code>-100...</code>)"); return
+            self.bot.send_message(chat_id, "➖ Send chat to remove (example: <code>@channel</code> OR <code>-100...</code>)")
+            return
 
         if data == "owner:list_join":
             targets = self.join_targets()
@@ -821,25 +885,20 @@ except Exception as e:
 
         if data == "owner:models":
             self.owner_flow["await"] = "models"
-            self.bot.send_message(chat_id, "🧠 Send models list comma-separated.\nExample: <code>flux, sdxl</code>"); return
-
-        if data == "owner:defaults":
-            self.owner_flow["await"] = "defaults"
-            self.bot.send_message(chat_id, "🎨🧠 Send default style + model like:\n<code>Pointillism | flux</code>"); return
+            self.bot.send_message(chat_id, "🧠 Send models list comma-separated.\nExample: <code>flux, sdxl</code>")
+            return
 
         if data == "owner:ui_text":
             self.owner_flow["await"] = "ui_text"
-            self.bot.send_message(chat_id, "📝 Send UI text like:\n<code>Title | Subtitle | Footer</code>"); return
-
-        if data == "owner:set_tts_voice":
-            self.owner_flow["await"] = "tts_default"
-            self.bot.send_message(chat_id, "🎙 Send default TTS voice name.\nUse /voices to see names."); return
+            self.bot.send_message(chat_id, "📝 Send UI text like:\n<code>Title | Subtitle | Footer</code>")
+            return
 
         if data == "owner:refresh_styles":
             self.state["styles_cache"]["styles"] = []
             self.state["styles_cache"]["ts"] = 0
             self.save()
-            self.bot.send_message(chat_id, "✅ Styles cache cleared. Next style menu will refetch."); return
+            self.bot.send_message(chat_id, "✅ Styles cache cleared. Next style menu will refetch.")
+            return
 
         if data == "owner:stats":
             users = self.state["users"]
@@ -856,20 +915,24 @@ except Exception as e:
 
         if data == "owner:broadcast":
             self.owner_flow["await"] = "broadcast"
-            self.bot.send_message(chat_id, "📢 Send broadcast message text (it will go to all users)."); return
+            self.bot.send_message(chat_id, "📢 Send broadcast message text (it will go to all users).")
+            return
 
         if data == "owner:ban_unban":
             self.owner_flow["await"] = "ban_unban"
-            self.bot.send_message(chat_id, "🚫 Send: <code>ban 123</code> or <code>unban 123</code>"); return
+            self.bot.send_message(chat_id, "🚫 Send: <code>ban 123</code> or <code>unban 123</code>")
+            return
 
         if data == "owner:reset_user":
             self.owner_flow["await"] = "reset_user"
-            self.bot.send_message(chat_id, "♻️ Send user id to reset.\nExample: <code>7702984107</code>"); return
+            self.bot.send_message(chat_id, "♻️ Send user id to reset.\nExample: <code>7702984107</code>")
+            return
 
         if data == "owner:reset_all":
             self.state["users"] = {}
             self.save()
-            self.bot.send_message(chat_id, "🧨 Reset ALL users done."); return
+            self.bot.send_message(chat_id, "🧨 Reset ALL users done.")
+            return
 
     def handle_owner_text(self, m, step: str):
         chat_id = m.chat.id
@@ -880,7 +943,7 @@ except Exception as e:
                 self.S()["cooldown_seconds"] = max(0, int(text))
                 self.save()
                 self.bot.send_message(chat_id, "✅ Cooldown updated.")
-            except:
+            except Exception:
                 self.bot.send_message(chat_id, "❌ Invalid number.")
             return
 
@@ -889,17 +952,19 @@ except Exception as e:
                 self.S()["daily_limit"] = max(0, int(text))
                 self.save()
                 self.bot.send_message(chat_id, "✅ Daily limit updated.")
-            except:
+            except Exception:
                 self.bot.send_message(chat_id, "❌ Invalid number.")
             return
 
         if step == "add_join":
             obj = self.parse_join_line(text)
             if not obj:
-                self.bot.send_message(chat_id, "❌ Format wrong.\nUse:\n<code>@channel | https://t.me/channel</code>\nOR\n<code>-100... | https://t.me/+InviteLink</code>")
+                self.bot.send_message(
+                    chat_id,
+                    "❌ Format wrong.\nUse:\n<code>@channel | https://t.me/channel</code>\nOR\n<code>-100... | https://t.me/+InviteLink</code>"
+                )
                 return
             targets = self.join_targets()
-            # prevent duplicates
             chats = set([t["chat"] for t in targets])
             if obj["chat"] in chats:
                 self.bot.send_message(chat_id, "⚠️ Already added.")
@@ -932,20 +997,6 @@ except Exception as e:
             self.bot.send_message(chat_id, "✅ Models updated.")
             return
 
-        if step == "defaults":
-            if "|" not in text:
-                self.bot.send_message(chat_id, "❌ Use: <code>Style | model</code>")
-                return
-            st, md = [x.strip() for x in text.split("|", 1)]
-            if not st or not md:
-                self.bot.send_message(chat_id, "❌ Missing.")
-                return
-            self.S()["default_style"] = st
-            self.S()["default_model"] = md
-            self.save()
-            self.bot.send_message(chat_id, "✅ Defaults updated.")
-            return
-
         if step == "ui_text":
             if text.count("|") < 2:
                 self.bot.send_message(chat_id, "❌ Use: <code>Title | Subtitle | Footer</code>")
@@ -958,19 +1009,13 @@ except Exception as e:
             self.bot.send_message(chat_id, "✅ UI text updated.")
             return
 
-        if step == "tts_default":
-            self.S()["tts_default_voice"] = text
-            self.save()
-            self.bot.send_message(chat_id, f"✅ Default TTS voice set: <code>{text}</code>")
-            return
-
         if step == "broadcast":
             sent = 0
             for uid_str in list(self.state["users"].keys()):
                 try:
                     self.bot.send_message(int(uid_str), f"📢 <b>Broadcast</b>\n━━━━━━━━━━━━━━━━━━━━━━\n{text}")
                     sent += 1
-                except:
+                except Exception:
                     pass
             self.bot.send_message(chat_id, f"✅ Broadcast sent to: <b>{sent}</b> users.")
             return
@@ -983,13 +1028,15 @@ except Exception as e:
             cmd, uid_s = parts[0].lower(), parts[1]
             try:
                 uid = int(uid_s)
-            except:
+            except Exception:
                 self.bot.send_message(chat_id, "❌ Invalid ID.")
                 return
             if cmd == "ban":
-                self.ban(uid); self.bot.send_message(chat_id, f"✅ Banned: <code>{uid}</code>")
+                self.ban(uid)
+                self.bot.send_message(chat_id, f"✅ Banned: <code>{uid}</code>")
             elif cmd == "unban":
-                self.unban(uid); self.bot.send_message(chat_id, f"✅ Unbanned: <code>{uid}</code>")
+                self.unban(uid)
+                self.bot.send_message(chat_id, f"✅ Unbanned: <code>{uid}</code>")
             else:
                 self.bot.send_message(chat_id, "❌ Use ban/unban.")
             return
@@ -997,7 +1044,7 @@ except Exception as e:
         if step == "reset_user":
             try:
                 uid = int(text)
-            except:
+            except Exception:
                 self.bot.send_message(chat_id, "❌ Invalid user id.")
                 return
             self.state["users"].pop(str(uid), None)
