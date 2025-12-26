@@ -1,4 +1,5 @@
 import random
+import io
 from typing import Dict, Any, Tuple, List, Optional
 
 import telebot
@@ -275,12 +276,20 @@ class RaoBot:
         m = self.bot.send_message(chat_id, f"⚡ Generating…\n🎨 <b>{style}</b> | 🧠 <b>{model}</b>")
         try:
             img = fetch_image_bytes(final_prompt, model=model, style_title=style)
-            self.add_history(uid, prompt)
-            self.bot.send_photo(chat_id, img, caption=f"✅ Done!\n🎨 <b>{style}</b> | 🧠 <b>{model}</b>")
-            try:
-                self.bot.delete_message(chat_id, m.message_id)
-            except Exception:
-                pass
+self.add_history(uid, prompt)
+
+try:
+    photo = io.BytesIO(img)
+    photo.name = "rao.png"   # 🔴 VERY IMPORTANT (Railway fix)
+
+    self.bot.send_photo(chat_id, photo, caption=caption)
+    self.bot.delete_message(chat_id, m.message_id)
+
+except Exception as e:
+    self.bot.send_message(
+        chat_id,
+        "❌ Image API busy / slow hai.\n⏳ 1-2 minute baad try karo."
+    )
         except Exception as e:
             self.bot.edit_message_text(f"❌ API Error: <code>{e}</code>", chat_id, m.message_id)
 
