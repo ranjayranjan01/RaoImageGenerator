@@ -1054,5 +1054,11 @@ class RaoBot:
 
     # ----------------- run -----------------
     def run(self):
-        print("✅ RaoBot polling started")
-        self.bot.infinity_polling(timeout=60, long_polling_timeout=60)
+    print("✅ RaoBot polling started")
+    try:
+        # ensure webhook is disabled for polling
+        self.bot.remove_webhook(drop_pending_updates=True)
+    except Exception:
+        pass
+
+    self.bot.infinity_polling(timeout=60, long_polling_timeout=60, skip_pending=True)
